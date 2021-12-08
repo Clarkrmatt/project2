@@ -45,13 +45,14 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 library(kableExtra)
 ```
 
-# Mining, Classification, Prediction
+# Mining, Classification, Prediction of Taylor Swift's Discography 
 
 ## Matthew Clark UTEID:Mrc4433
 
 ### Introduction 
 
-The data set I will be using was retrieved from https://www.kaggle.com/thespacefreak/taylor-swift-spotify-data 
+The data set I will be using was retrieved from https://www.kaggle.com/thespacefreak/taylor-swift-spotify-data. 
+
 
 Kaggle collected data from the songs on Taylor Swift's albums using the Spotify WebAPI (with a preference for Taylor's Version and Deluxe versions of albums; NOTE: though Red (Taylor's Version) has since been released, this data was collected before it's release and therefore we will consider it to be owned by Scooter Braun for the purposes of this analysis). The variables in the data set are as follows (with definitions as provided by Kaggle):
 
@@ -79,7 +80,6 @@ The data has 168 observations (tracks) across 9 albums. Below is the name of eac
 -**Lover**-18 Tracks
 -**folklore (deluxe version)**- 17 Tracks
 -**evermore (deluxe version)**-17 Tracks
-
 
 
 ```{R}

@@ -42,96 +42,355 @@ class_diag <- function(score, truth, positive, cutoff=.5){
   auc<- sum( ((TPR[-1]+TPR[-n])/2) * (FPR[-1]-FPR[-n]) )
   round(data.frame(acc,sens,spec,ppv,f1,ba=(sens+spec)/2,auc, row.names = "Metrics"),4)
 }
+library(kableExtra)
 ```
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Matthew Clark UTEID:Mrc4433
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+The data set I will be using was retrieved from https://www.kaggle.com/thespacefreak/taylor-swift-spotify-data 
+
+Kaggle collected data from the songs on Taylor Swift's albums using the Spotify WebAPI (with a preference for Taylor's Version and Deluxe versions of albums; NOTE: though Red (Taylor's Version) has since been released, this data was collected before it's release and therefore we will consider it to be owned by Scooter Braun for the purposes of this analysis). The variables in the data set are as follows (with definitions as provided by Kaggle):
+
+- **Name** - The name of the song 
+- **Album**- what album the song is from 
+- **Length**- length of song in milliseconds 
+- **Popularity** - Spotify-based percent popularity of a song 
+- **Danceability** - derived from elements like tempo, beat strength, and regularity 
+- **Acousticness** - How acoustic the song is 
+- **Energy** - Perceptual measure of intensity and activity 
+- **Instrumentalness** - Amount of vocals in the song 
+- **Liveness** - Probability that the song was recorded with a live audience
+- **Loudness** - Tendency of the song to be recorded at steadily higher volumes
+- **Speechiness** - Presence of spoken words in the song
+- **Valence** - Measure of how "happy" or "sad" the song sounds
+- **Tempo** - Beats per Minute (BPM)
+
+The data has 168 observations (tracks) across 9 albums. Below is the name of each album and the number of tracks observed for each. 
+- **Taylor Swift** - 15 Tracks 
+- **Fearless (Taylor's Version)** - 26 Tracks
+-**Speak Now (Deluxe Package)**- 22 Tracks
+-**Red (Deluxe Edition)**- 22 Tracks 
+-**1989 (Deluxe)**- 16 Tracks
+-**reputation**-15 Tracks
+-**Lover**-18 Tracks
+-**folklore (deluxe version)**- 17 Tracks
+-**evermore (deluxe version)**-17 Tracks
+
+
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+library(readr)
 
-# if your dataset needs tidying, do so here
+spotifytaylorswift <- read_csv("/stor/home/mrc4433/project2/spotifytaylorswift.csv")
 
-# any other code here
+Swift <- spotifytaylorswift %>% select(!c(X1, release_date, artist)) %>% filter(str_detect(spotifytaylorswift$name, "Voice Memo") == "FALSE")
+
+count(Swift)
+Swift %>% group_by(album) %>% summarize(n=n())
 ```
 
 ### Cluster Analysis
 
 ```{R}
 library(cluster)
-# clustering code here
+library(GGally)
+
+Swiftnum <- Swift %>% select(!c(name, album))
+
+Swiftnum %>% cor %>% as.data.frame %>% rownames_to_column %>% 
+  pivot_longer(-1) %>% ggplot(aes(rowname, name, fill=value)) +
+  geom_tile() + geom_text(aes(label=round(value,2))) + 
+  coord_fixed() + scale_fill_gradient2(low="red", mid="white", high="blue") +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1), 
+        axis.title.x=element_blank(), 
+        axis.title.y=element_blank())
 ```
 
-Discussion of clustering here
-    
+Firstly, I created a correlational matrix of the data to understand how the variables in the data set interact with each other. While correlations are overall fairly low, there are distinct outliers. "Energy" is strongly positively correlated with "Loudness" and strongly negatively correlated with "Acousticness". In addition, there is some positive correlation between "valence" and "energy" as well as some negative correlation between "valence" and "length". With this, I expect the clusters to vary most across these variables. In order to test this, I first had to determine the ideal number of clusters.
+
+```{R}
+sil_width<-vector()
+for(i in 2:10){  
+  pamdata <- pam(Swiftnum, k = i)  
+  sil_width[i] <- pamdata$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+```
+
+To determine the ideal number of clusters, I began by creating and filling a vector of silhouette widths across different numbers of clusters in pam analysis. Higher silhouette widths indicate more distanced clusters while lower widths indicate more overlapping clusters. Upon graphing silhouette widths, it is apparent (from a maximum silhouette width) that 2 clusters is the ideal number for this analysis.
+
+```{R}
+
+Swiftpam <- Swift %>% select(!c(name)) %>% pam(2)
+
+Swift <- Swift %>% mutate(cluster = as.factor(Swiftpam$clustering))
+
+
+plot(Swiftpam, which=2)
+
+
+Swift %>% select(!c(name, album)) %>% ggpairs(cols=3:14, aes(color=cluster))
+
+#Swiftgower <- Swift %>% select(-name)  %>% mutate_if(is.character, as.factor) %>% daisy(metric="gower") 
+#sil_width<-vector()
+#for(i in 2:10){  
+  #fit <- pam(Swiftgower, diss = TRUE, k = i)  
+  #sil_width[i] <- fit$silinfo$avg.width}
+#ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+#Swiftpam <- pam(Swiftgower, k=9, diss=T)
+
+
+```
+
+Next, I tested the strength of the structure of this pam analysis (conducted with 2 clusters). This yielded an average silhouette width of 0.61, indicating a reasonable structure (goodness of fit) has been found. NOTE: I attempted to do a gower analysis including the "album" variable, but it yielded an average silhouette width (using 9 clusters) of 0.31. This silhouette width indicated that the structure could be artificial and upon further analysis the data set was largely just grouping based on album. I've included the gower code--commented out--but have decided to go on the non-gower analysis due to its stronger average silhouette width. 
+
+```{R}
+Swift %>% group_by(cluster) %>% summarize_if(is.numeric, .funs = list("Mean"=mean, "Median"=median, "SD"=sd), na.rm=T) %>% pivot_longer(-1) %>% separate(name, sep="_", into=c("Variable", "Stat")) %>% pivot_wider(names_from = "Variable", values_from="value")  %>% arrange(Stat) %>% kable() %>% kable_styling(bootstrap_options = c("striped","condensed"))
+```
+
+To do further analysis of the clusters, I generated summarization data (namely mean, median, and standard deviation) across all variables grouped by cluster. In addition, I also used ggpairs to visualize the pairwise variable combinations (color-coded by cluster assignment). 
+
+Results:
+Cluster 1 appears to have shorter lengths (the largest discriminating variable) It also trends slightly higher on valence, instrumentalness, danceability, and energy. In addition, it also trends lower on acousticness.  
+Conversely, Cluster 1 appears to have longer lengths (again, the largest discriminating variable). It also trends lower on valence, instrumentalness, danceability, and energy. Lastly, it also trends higher on acousticness. 
     
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+#Swiftnums <- Swift %>% select_if(is.numeric) %>% scale
+#rownames(Swiftnums) <- Swift$name
+#SwiftPCA <- princomp(Swiftnums, cor=T)
+#summary(SwiftPCA, loadings=T)
+
+
+Swiftnums2 <- Swift %>% select_if(is.numeric) %>% select(c(length, acousticness, valence, loudness, energy)) %>% scale
+rownames(Swiftnums2) <- Swift$name
+SwiftPCA2 <- princomp(Swiftnums2, cor=T)
+summary(SwiftPCA2, loadings=T) 
+
+SwiftData <- data.frame(Name=Swift$name, PC1=SwiftPCA2$scores[,1], PC2=SwiftPCA2$scores[,2], PC3=SwiftPCA2$scores[,3])
+
+ggplot(SwiftData, aes(PC1, PC2)) + geom_point()
+#ggplot(SwiftData, aes(PC2, PC3)) + geom_point()
+#ggplot(SwiftData, aes(PC1, PC3)) + geom_point()
+
 ```
 
-Discussions of PCA here. 
+First, I attempted to conduct a PCA with all of the variables in the data set. For this PCA, 6 components would have needed to be kept to account for enough variability. Though this PCA is still in the code above (commented out), I opted for specific variables of interest so that visual analysis was plausible. Namely, these variables are length, acousticness, valences, loudness, and energy. These were chosen due to their interest in the correlational matrix during cluster analysis. With this, I did a second PCA, called SwiftPCA2, that indicated three component must be kept to account for enough variability. These three components, taken together, account for approximately 90.9% of variance across the variables analyzed. 
+
+In addition to numerical analysis, I also created a visual representation of the song data points across principle components 1 and 2 (I did not include 3 due to difficult with 3 dimensional graphing, but I did include (commented out) graphs of PC1 vs PC3 and of PC2 vs PC3. In addition, I wanted to note that PC1 and PC2 account for approximately 79. 6% of the data when taken together and therefore excluding PC3 in the graphing did not drop the variance described significantly below the 80% threshold.) 
+
+What the Components mean: 
+
+**Component 1**
+
+Scoring high on component one indicated more acousticness and less loudness and energy. High scores on this component would indicate songs that are less "pop"-like . Low scores would indicate songs that are more "pop"-like (energetic and loud). This component makes up about 55.6% of the total variance in this analysis. 
+
+**Component 2**
+
+Scoring high on component two indicates a longer song. It also indicates lower "valence". High scores on the component indicate longer, "sadder" songs and low scores would indicate shorter, "happier" songs. This component makes up about 24% of the total variance across the variables analyzed. 
+
+**Component 3**
+
+Scoring high on component three indicates longer lengths and higher valences. High scores on this component indicate longer, "happier" songs and low scores would indicate shorter, "sadder" songs. This component makes up about 11.3% of the total variance across the variables analyzed. 
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+
+TaylorsMusic <- c("Fearless (Taylor's Version)", "Lover", "folklore (deluxe version)", "evermore (deluxe version)") 
+                  
+spotifytaylorswift <- read_csv("/stor/home/mrc4433/project2/spotifytaylorswift.csv")
+Swift <- spotifytaylorswift %>% select(!c(X1, release_date, artist)) %>% filter(str_detect(spotifytaylorswift$name, "Voice Memo") == "FALSE") 
+Swift <- Swift %>% mutate(Owns = ifelse(Swift$album %in% TaylorsMusic == TRUE , "Swift", "Braun"))
+
+Swift$Owns %>% as.factor() -> Swift$Owns
+
+Swift %>% group_by(Owns) %>% summarize(n=n())
+
+fit <- glm(Owns ~ length + 
+             popularity + 
+             danceability +
+             acousticness +
+             energy +
+             instrumentalness +
+             liveness +
+             loudness +
+             speechiness +
+             valence +
+             tempo, data=Swift, family="binomial")
+score <- predict(fit, type="response")
+
+cutoffs <- c(.1, .2, .3, .4, .5, .6, .7, .8, .9, 1)
+accuracy <- vector()
+for(i in 1:10){y_hat <- ifelse(score>cutoffs[i], "Swift", "Braun")
+  accuracy[i] <- mean(Swift$Owns==y_hat)}
+cutoffs[which.max(accuracy)]
+
+class_diag(score, truth=Swift$Owns, positive="Swift", cutoff=0.5)
+Prediction <- ifelse(score > 0.5, "Swift", "Braun") 
+table(actual=Swift$Owns, predicted=Prediction)
+
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+k=10 
+
+data <- Swift[sample(nrow(Swift)),]
+folds <- cut(seq(1:nrow(Swift)), breaks=k, labels=F) 
+diags <- NULL
+
+for (i in 1:k){
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Owns
+  
+  fit <- glm(Owns ~ length + 
+             popularity + 
+             danceability +
+             acousticness +
+             energy +
+             instrumentalness +
+             liveness +
+             loudness +
+             speechiness +
+             valence +
+             tempo, data=train, family="binomial")
+  
+  probs <- predict(fit, newdata=test, type="response")
+  
+  diags <- rbind(diags, class_diag(probs, truth, positive="Swift"))}
+
+summarize_all(diags, mean)
+
+
 ```
 
-Discussion here
+We will be trying to predict if Taylor Swift owns a song based on its measurements across the numeric variables in the Swift data set. With this, I first defined which songs were by Taylor Swift and which were owned by Braun (done based on which album each song came from. As discussed in the introduction, since this data does not include Taylor's recent release of Red (Taylor's Version), the songs are considered owned by Braun in this context). Upon creating this categorical variable with the given constraints, 90 of the tracks are owned by Scooter Braun while 78 are owned by Taylor Swift.
+
+Following this variable mutation, I generated a generalized linear model predicting song ownership based on all of the numeric variables. Following this, I trained the model to the data set by optimizing the cutoff (to yield the most correct predictions). With this optimized cutoff, 0.5, I used class_diag() to generate performance details. Namely, the AUC of 0.9056 (indicating great predictive power). Following cross validation, an AUC just below that of the non-validated test was discovered. Being nearly the same as the non-cross-validated AUC (except a little bit lower), there are some signs of overfitting of the data (though there don't appear to be dramatic signs of overfitting). 
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+
+Swiftknn <- knn3(factor(Owns, levels=c("Swift","Braun")) ~
+            length + 
+             popularity + 
+             danceability +
+             acousticness +
+             energy +
+             instrumentalness +
+             liveness +
+             loudness +
+             speechiness +
+             valence +
+             tempo, data=Swift, k = 10)
+
+y_hat_knn <- predict(Swiftknn, Swift, posiitve="Swift")
+
+class_diag(y_hat_knn[,1], Swift$Owns, positive="Swift")
+
+Prediction <- ifelse(y_hat_knn[,1] > 0.5, "Swift", "Braun") 
+table(actual=Swift$Owns, predicted=Prediction)
+
 ```
 
 ```{R}
-# cross-validation of np classifier here
+
+k=10 
+
+data <- Swift[sample(nrow(Swift)),]
+folds <- cut(seq(1:nrow(Swift)), breaks=k, labels=F) 
+diags <- NULL
+
+for (i in 1:k){
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$Owns
+  
+  fit <- knn3(factor(Owns, levels=c("Swift","Braun")) ~
+            length + 
+             popularity + 
+             danceability +
+             acousticness +
+             energy +
+             instrumentalness +
+             liveness +
+             loudness +
+             speechiness +
+             valence +
+             tempo, data=train, k=10)
+  
+  probs <- predict(fit, newdata=test)[,1]
+  
+  diags <- rbind(diags, class_diag(probs, truth, positive="Swift"))}
+
+summarize_all(diags, mean)
+
 ```
 
-Discussion
+As with the previous model, we will be trying to predict if Taylor Swift owns a song based on its measurements across the numeric variables in the Swift data set. 
+I generated a non-parametric k-nearest neighbors model predicting song ownership based on all of the numeric variables (by surveying the nearest 10 points. Following this, I used class_diag() to generate performance details. Namely, the AUC of 0.6959 (this is a "Poor", but almost "Fair" AUC). Following cross validation, an AUC (usually) at least 0.1 units lower than that of the non-validated test was discovered. Being significnatly lower than the unvalidated data, there are clear signs of overfitting of the data. Notably, this cross-validation reveals that the "poor" data is even worse off and lands in the "bad" zone. Overall, this non-parametric model is a bad predictor of song ownership. 
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+fit <- lm(valence ~ acousticness + album, data=Swift)
+yhatlm <- predict(fit)
+
+mean((Swift$valence-yhatlm)^2) #MSE
 ```
 
 ```{R}
-# cross-validation of regression model here
+k=10 
+
+data <- Swift[sample(nrow(Swift)),]
+folds <- cut(seq(1:nrow(Swift)), breaks=k, labels=F) 
+diags <- NULL
+
+for (i in 1:k){
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  
+  fit <- lm(valence~acousticness + album, data=train)
+  
+  yhatlm <- predict(fit, newdata=test)
+  
+  diags <- mean((test$valence-yhatlm)^2) }
+
+mean(diags) #MSE across 10 fold cross validation
+
 ```
 
-Discussion
+In this regression model, we will be training a model to predict the "valence" of a song based on its "acousticness" and which album it is from. Using a linear regression model, acousticness and album were able to predict valence with a mean squared error of approximately 0.031. Upon 10-fold cross-validation, the average mean squared error decreased to approximately 0.028. Since this value did not increase upon cross-validation, there are no signs of overfitting of the model. 
 
 ### Python 
 
 ```{R}
 library(reticulate)
+TaylorSwift <- "The Music Industry"
 ```
 
 ```{python}
-# python code here
+TV="(Taylor's Version)" 
+
+print(r.TaylorSwift, TV)
 ```
 
-Discussion
+```{R}
+cat(c(TaylorSwift, py$TV))
+```
+In the first chunk of this section, I opened the reticulate library (allowing r-studio python cross-talk) and defined "TaylorSwift" as "The Music Industry". In the second chunk, specified to take python script, I defined (in python) "TV" as "(Taylor's Version)". In addition, I also used the python "print" function for both the R and pyhton code. In order to print r studio code in python script, I used the "r." prefix to call up the r object. This function printed "The Music Industry (Taylor's Version)". In the final chunk, I aimed to do the opposite. In R, we use the concatenate function to print these two phrases together. Much like with python, R studio has a special method of addressing python objects. The "py$" prefix of the reticulate library is used to call upon python-encoded objects. With this, the function in chunk three also prints out "The Music Industry (Taylor's Version)". 
 
-### Concluding Remarks
-
-Include concluding remarks here, if any
 
 
 
